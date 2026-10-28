@@ -1,36 +1,22 @@
-import { Schema, model, Types } from "mongoose"
+import { Schema, model } from "mongoose"
 import type { InferSchemaType } from "mongoose"
+
+export const MAX_CART_QUANTITY = 20
 
 const cartItemSchema = new Schema(
   {
-    product: {
-      type: Schema.Types.ObjectId,
-      ref: "Product",
-      required: true,
-    },
-    quantity: {
-      type: Number,
-      required: true,
-      min: 1,
-      default: 1,
-    },
+    product: { type: Schema.Types.ObjectId, ref: "Product", required: true },
+    quantity: { type: Number, required: true, min: 1, max: MAX_CART_QUANTITY, default: 1 },
   },
-  { _id: false } // Prevents generating a separate _id for each cart sub-item
+  { _id: false },
 )
 
 const cartSchema = new Schema(
   {
-    user: {
-      type: Schema.Types.ObjectId,
-      ref: "User", // Match your user model registration name (usually "User" or "userModel")
-      required: true,
-      unique: true,
-    },
-    items: [cartItemSchema], // Array of products and quantities
+    user: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true },
+    items: { type: [cartItemSchema], default: [] },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true },
 )
 
 export type Cart = InferSchemaType<typeof cartSchema>

@@ -10,7 +10,11 @@ NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 CLOUDINARY_CLOUD_NAME: z.string().min(1),
 CLOUDINARY_API_KEY: z.string().min(1),
 CLOUDINARY_API_SECRET: z.string().min(1),
-AFROMESSAGE_TOKEN:z.string().min(1)
+AFROMESSAGE_TOKEN:z.string().min(1),
+TELEBIRR_NAME: z.string().min(1),
+TELEBIRR_NUMBER: z.string().min(1),
+CBE_NAME: z.string().min(1),
+CBE_ACCOUNT: z.string().min(1),
 })
 const parsed = envSchema.safeParse(process.env)
 if (!parsed.success) {

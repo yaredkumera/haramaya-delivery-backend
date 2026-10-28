@@ -17,7 +17,7 @@ const sorts = {
   price_desc: { price: -1, createdAt: -1 },
 } as const
 
-function toPublicProduct(product: HydratedDocument<Product>): PublicProduct {
+export function toPublicProduct(product: HydratedDocument<Product>): PublicProduct {
   return {
     id: String(product._id),
     name: product.name,

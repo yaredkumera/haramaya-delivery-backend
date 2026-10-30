@@ -1,9 +1,10 @@
 import * as cheerio from "cheerio"
 import pdf from "pdf-parse/lib/pdf-parse.js"
 import { env } from "../config/env.js"
-import type { PaymentMethod } from "../models/order.model.js"
+import type { ReceiptSource } from "../models/order.model.js"
 
 export type Receipt = {
+  source: ReceiptSource
   reference: string
   successful: boolean
   amount: number
@@ -13,13 +14,7 @@ export type Receipt = {
   paidAt: Date
 }
 
-type Expected = {
-  reference: string
-  amount: number
-  payerName: string
-  receiver: string
-  receiverAccountEnd?: string
-}
+type Expected = { reference: string; amount: number; payerName: string }
 
 const MAX_AGE_MS = 24 * 60 * 60 * 1000
 const MAX_BYTES = 3_000_000
@@ -31,43 +26,48 @@ const toNumber = (text: string) => parseFloat(text.replace(/[^0-9.]/g, "")) || 0
 const lastDigits = (text: string, count: number) => text.replace(/\D/g, "").slice(-count)
 const nameWords = (name: string) => norm(name).split(" ").filter((word) => word && !TITLES.has(word))
 
+export const detectSource = (id: string): ReceiptSource | null =>
+  /^FT[A-Z0-9]{10}$/.test(id) ? "cbe" : /^[A-Z0-9]{10}$/.test(id) ? "telebirr" : null
+
+const receivers = [
+  { method: "telebirr", name: env.TELEBIRR_NAME, accountEnd: lastDigits(env.TELEBIRR_NUMBER, 4) },
+  { method: "cbe", name: env.CBE_NAME, accountEnd: lastDigits(env.CBE_ACCOUNT, 4) },
+] as const
+
 const sameName = (typed: string, onReceipt: string, minWords = 1) => {
   const typedWords = nameWords(typed)
   const receiptWords = new Set(nameWords(onReceipt))
   return typedWords.length >= minWords && typedWords.every((word) => receiptWords.has(word))
 }
 
-// Returns the reasons a receipt cannot be trusted. An empty list is a perfect match.
-export function checkReceipt(receipt: Receipt, expected: Expected): string[] {
+export function checkReceipt(receipt: Receipt, expected: Expected) {
   const problems: string[] = []
   const age = Date.now() - receipt.paidAt.getTime()
+
+  const matches = receivers.filter(
+    (r) =>
+      sameName(r.name, receipt.receiver) &&
+      (!receipt.receiverAccount || lastDigits(receipt.receiverAccount, 4) === r.accountEnd),
+  )
 
   if (receipt.reference !== expected.reference) problems.push("Receipt does not match the transaction ID")
   if (!receipt.successful) problems.push("The payment is not marked as completed")
   if (Math.abs(receipt.amount - expected.amount) > 0.01) {
     problems.push(`Amount is ${receipt.amount} ETB, expected ${expected.amount} ETB`)
   }
-  if (!sameName(expected.receiver, receipt.receiver)) problems.push("The payment went to a different account")
-  if (
-    expected.receiverAccountEnd &&
-    receipt.receiverAccount &&
-    lastDigits(receipt.receiverAccount, 4) !== expected.receiverAccountEnd
-  ) {
-    problems.push("The receiver account does not match")
-  }
+  if (matches.length === 0) problems.push("The money did not go to one of our accounts")
   if (!sameName(expected.payerName, receipt.payerName, 2)) problems.push("The payer name does not match")
   if (!(age >= -60_000 && age <= MAX_AGE_MS)) problems.push("The payment date is too old or invalid")
 
-  return problems
+  return { problems, paidTo: matches.length === 1 ? matches[0].method : undefined }
 }
-
 // Downloads from a fixed host only. Any problem returns null, which means "check by hand".
-async function download(url: string): Promise<Buffer | null> {
+async function download(url: string,timeoutMs = 10_000): Promise<Buffer | null> {
   const host = new URL(url).hostname
   try {
     const response = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(timeoutMs),
     })
     if (!response.ok || new URL(response.url).hostname !== host) return null
     if (Number(response.headers.get("content-length")) > MAX_BYTES) return null
@@ -100,7 +100,7 @@ async function readCbe(ft: string): Promise<Receipt | null> {
 
   const url = new URL("https://apps.cbe.com.et:100/")
   url.searchParams.set("id", ft + suffix)
-  const bytes = await download(url.toString())
+  const bytes = await download(url.toString(),20_000)
   if (!bytes || bytes.subarray(0, 4).toString() !== "%PDF") return null
 
   const lines = (await pdf(bytes)).text.split("\n").map(clean).filter(Boolean)
@@ -128,12 +128,13 @@ async function readCbe(ft: string): Promise<Receipt | null> {
     receiver: field("Receiver"),
     receiverAccount: accountUnder("Receiver"),
     paidAt,
+    source:"cbe",
   }
 }
 
 async function readTelebirr(id: string): Promise<Receipt | null> {
   if (!/^[A-Z0-9]{10}$/.test(id)) return null
-  const bytes = await download(`https://transactioninfo.ethiotelecom.et/receipt/${id}`)
+  const bytes = await download(`https://transactioninfo.ethiotelecom.et/receipt/${id}`,20_000)
   if (!bytes) return null
 
   const $ = cheerio.load(bytes.toString("utf8"))
@@ -155,15 +156,14 @@ async function readTelebirr(id: string): Promise<Receipt | null> {
     payerName: pick("payer name"),
     receiver: pick("credited party name"),
     paidAt,
+        source: "telebirr",
+    receiverAccount: pick("bank account number") || undefined,
   }
 }
 
-export async function fetchReceipt(
-  method: Exclude<PaymentMethod, "cod">,
-  transactionId: string,
-): Promise<Receipt | null> {
+export async function fetchReceipt(source: ReceiptSource, transactionId: string): Promise<Receipt | null> {
   try {
-    return method === "cbe" ? await readCbe(transactionId) : await readTelebirr(transactionId)
+    return source === "cbe" ? await readCbe(transactionId) : await readTelebirr(transactionId)
   } catch (error) {
     console.error("Receipt parsing failed:", error instanceof Error ? error.message : error)
     return null

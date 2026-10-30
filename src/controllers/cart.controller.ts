@@ -26,7 +26,6 @@ export const removeItem: RequestHandler<{ productId: string }> = async (req, res
   const cart = await cartService.removeCartItem(getAuthUser(req).id, productId)
   res.json({ success: true, message: "Item removed from cart", data: cart })
 }
-
 export const clear: RequestHandler = async (req, res) => {
   const cart = await cartService.clearCart(getAuthUser(req).id)
   res.json({ success: true, message: "Cart cleared", data: cart })

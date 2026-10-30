@@ -9,7 +9,8 @@ export type PaymentStatus = (typeof paymentStatuses)[number]
 
 export const orderStatuses = ["placed", "ready_for_pickup", "collected", "cancelled"] as const
 export type OrderStatus = (typeof orderStatuses)[number]
-
+export const receiptSources = ["telebirr", "cbe"] as const
+export type ReceiptSource = (typeof receiptSources)[number]
 
 const orderItemSchema = new Schema(
   {
@@ -35,6 +36,14 @@ const orderSchema = new Schema(
     status: { type: String, enum: orderStatuses, default: "placed" },
     transactionId: { type: String },
     payerName: { type: String, trim: true },
+        receiptSource: { type: String, enum: receiptSources },
+    paidTo: { type: String, enum: receiptSources },
+    receipt: {
+      payerName: { type: String },
+      receiverName: { type: String },
+      amount: { type: Number },
+      paidAt: { type: Date },
+    },
     reviewNotes: { type: [String], default: [] },
     pickupCode: { type: String, required: true, unique: true },
     paidAt: { type: Date },
@@ -44,9 +53,8 @@ collectedBy: { type: Schema.Types.ObjectId, ref: "User" },  },
   { timestamps: true },
 )
 
-// One live claim per transaction: a rejected payment frees its ID so an honest student can retry
 orderSchema.index(
-  { paymentMethod: 1, transactionId: 1 },
+  { receiptSource: 1, transactionId: 1 },
   {
     unique: true,
     partialFilterExpression: { transactionId: { $type: "string" }, paymentStatus: { $in: ["review", "paid"] } },

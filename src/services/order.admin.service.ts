@@ -3,8 +3,14 @@ import OrderModel from "../models/order.model.js"
 import type { Order } from "../models/order.model.js"
 import ApiError from "../utils/ApiError.js"
 import type { AdminOrderQuery } from "../validators/order.schema.js"
-import { toStudentOrder } from "./order.service.js"
+import { autoVerify, toStudentOrder } from "./order.service.js"
 
+export async function recheckPayment(id: string) {
+  await autoVerify(id)
+  const order = await OrderModel.findById(id).populate("user", CUSTOMER)
+  if (!order) throw new ApiError(404, "Order not found")
+  return toAdminOrder(order)
+}
 const CUSTOMER = "fullName phone email"
 const options = { returnDocument: "after", runValidators: true } as const
 
@@ -16,6 +22,16 @@ export function toAdminOrder(order: HydratedDocument<Order>) {
     transactionId: order.transactionId,
     payerName: order.payerName,
     reviewNotes: order.reviewNotes,
+        receiptSource: order.receiptSource,
+    paidTo: order.paidTo,
+    receipt: order.receipt?.paidAt
+      ? {
+          payerName: order.receipt.payerName,
+          receiverName: order.receipt.receiverName,
+          amount: order.receipt.amount,
+          paidAt: order.receipt.paidAt,
+        }
+      : undefined,
   }
 }
 
@@ -105,4 +121,9 @@ export async function cancelOrder(id: string) {
     options,
   ).populate("user", CUSTOMER)
   return moved(order, "This order can no longer be cancelled")
+}
+export async function findByPickupCode(code: string) {
+  const order = await OrderModel.findOne({ pickupCode: code }).populate("user", CUSTOMER)
+  if (!order) throw new ApiError(404, "No order with this pickup code")
+  return toAdminOrder(order)
 }

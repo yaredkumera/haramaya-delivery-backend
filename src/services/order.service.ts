@@ -8,14 +8,15 @@ import type { Order } from "../models/order.model.js"
 import type { Product } from "../models/product.model.js"
 import ApiError from "../utils/ApiError.js"
 import type { CheckoutInput } from "../validators/order.schema.js"
-import { checkReceipt, fetchReceipt } from "./receipt.service.js"
-
+import { checkReceipt, detectSource, fetchReceipt } from "./receipt.service.js"
+import type { ReceiptSource } from "../models/order.model.js"
 type DigitalCheckout = Extract<CheckoutInput, { transactionId: string }>
 
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 const newPickupCode = () =>
   Array.from({ length: 6 }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join("")
-
+const maskId = (id?: string | null) => (id && id.length > 6 ? `${id.slice(0, 3)}****${id.slice(-3)}` : (id ?? undefined))
+    
 export function toStudentOrder(order: HydratedDocument<Order>) {
   return {
     id: String(order._id),
@@ -34,38 +35,67 @@ export function toStudentOrder(order: HydratedDocument<Order>) {
     createdAt: order.createdAt,
     paidAt: order.paidAt,
     collectedAt: order.collectedAt,
+        payment: {
+      receiptSource: order.receiptSource,
+      paidTo: order.paidTo,
+      payerName: order.receipt?.payerName ?? order.payerName,
+      paidAt: order.receipt?.paidAt ?? order.paidAt,
+      transactionId: maskId(order.transactionId),
+    },
   }
 }
 
-async function assessPayment(input: DigitalCheckout, total: number) {
+async function assertUnclaimed(source: ReceiptSource, transactionId: string) {
   const taken = await OrderModel.exists({
-    
-    paymentMethod: input.paymentMethod,
-    transactionId: input.transactionId,
+    receiptSource: source,
+    transactionId,
     paymentStatus: { $in: ["review", "paid"] },
   })
   if (taken) throw new ApiError(409, "This transaction ID was already used for another order")
+}
 
-  const receipt = await fetchReceipt(input.paymentMethod, input.transactionId).catch((error) => {
-    console.error("Receipt check failed:", error)
-    return null
-  })
+async function readAndCheck(source: ReceiptSource, transactionId: string, payerName: string, total: number) {
+  const receipt = await fetchReceipt(source, transactionId)
+  if (!receipt) {
+    return { receipt: null, problems: ["The receipt could not be checked automatically"], paidTo: undefined }
+  }
+  return { receipt, ...checkReceipt(receipt, { reference: transactionId, amount: total, payerName }) }
+}
 
-  const receiver = input.paymentMethod === "telebirr" ? env.TELEBIRR_NAME : env.CBE_NAME
-  const receiverAccountEnd = input.paymentMethod === "cbe" ? env.CBE_ACCOUNT.replace(/\D/g, "").slice(-4) : undefined
-  const problems = receipt
-    ? checkReceipt(receipt, {
-        reference: input.transactionId,
-        amount: total,
-        payerName: input.payerName,
-        receiver,
-        receiverAccountEnd,
-      })
-    : ["The receipt could not be checked automatically"]
+// Safe to call again and again: it only changes an order that is still waiting for review
+export async function autoVerify(orderId: string) {
+  const order = await OrderModel.findOne({ _id: orderId, paymentStatus: "review" })
+  if (!order || !order.receiptSource || !order.transactionId || !order.payerName) return
 
-  return problems.length === 0
-    ? { paymentStatus: "paid" as const, paidAt: new Date(), reviewNotes: [] as string[] }
-    : { paymentStatus: "review" as const, reviewNotes: problems }
+  const { receipt, problems, paidTo } = await readAndCheck(
+    order.receiptSource,
+    order.transactionId,
+    order.payerName,
+    order.total,
+  )
+
+  const facts = receipt
+    ? {
+        receipt: {
+          payerName: receipt.payerName,
+          receiverName: receipt.receiver,
+          amount: receipt.amount,
+          paidAt: receipt.paidAt,
+        },
+        ...(paidTo ? { paidTo } : {}),
+      }
+    : {}
+
+  await OrderModel.updateOne(
+    { _id: orderId, paymentStatus: "review" },
+    {
+      $set: {
+        ...facts,
+        reviewNotes: problems,
+        ...(problems.length === 0 ? { paymentStatus: "paid", paidAt: new Date() } : {}),
+      },
+    },
+  )
 }
 
 export async function placeOrder(userId: string, input: CheckoutInput) {
@@ -81,9 +111,16 @@ export async function placeOrder(userId: string, input: CheckoutInput) {
   })
   const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
 
-  const digital = input.paymentMethod === "cod" ? null : input
+    let digital: { transactionId: string; payerName: string; receiptSource: ReceiptSource } | null = null
+  if (input.paymentMethod !== "cod") {
+    const receiptSource = detectSource(input.transactionId)
+    if (!receiptSource) throw new ApiError(400, "Enter the transaction ID exactly as shown on your receipt")
+    await assertUnclaimed(receiptSource, input.transactionId)
+    digital = { transactionId: input.transactionId, payerName: input.payerName, receiptSource }
+  }
+
   const payment = digital
-    ? await assessPayment(digital, total)
+    ? { paymentStatus: "review" as const, reviewNotes: ["Waiting for the automatic receipt check"] }
     : { paymentStatus: "unpaid" as const, reviewNotes: [] as string[] }
 
   const order = await mongoose.connection.transaction(async (session) => {
@@ -94,7 +131,7 @@ export async function placeOrder(userId: string, input: CheckoutInput) {
           items,
           total,
           paymentMethod: input.paymentMethod,
-          ...(digital ? { transactionId: digital.transactionId, payerName: digital.payerName } : {}),
+          ...(digital ?? {}),
           ...payment,
           pickupCode: newPickupCode(),
         },
@@ -104,7 +141,9 @@ export async function placeOrder(userId: string, input: CheckoutInput) {
     await CartModel.updateOne({ user: userId }, { $set: { items: [] } }, { session })
     return created
   })
-
+  if (digital) {
+    void autoVerify(String(order._id)).catch((error) => console.error("Auto verification failed:", error))
+  }
   return toStudentOrder(order)
 }
 

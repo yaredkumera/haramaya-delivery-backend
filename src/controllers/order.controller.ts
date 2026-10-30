@@ -3,7 +3,7 @@ import { env } from "../config/env.js"
 import * as orders from "../services/order.service.js"
 import * as admin from "../services/order.admin.service.js"
 import { getAuthUser } from "../utils/getAuthUser.js"
-import { adminOrderQuerySchema } from "../validators/order.schema.js"
+import { adminOrderQuerySchema,pickupCodeSchema } from "../validators/order.schema.js"
 import type { CheckoutInput, RejectInput } from "../validators/order.schema.js"
 
 type WithId = { id: string }
@@ -59,4 +59,13 @@ export const collect: RequestHandler<WithId> = async (req, res) => {
 
 export const cancel: RequestHandler<WithId> = async (req, res) => {
   res.json({ success: true, message: "Order cancelled", data: { order: await admin.cancelOrder(req.params.id) } })
+}
+export const recheck: RequestHandler<WithId> = async (req, res) => {
+  const order = await admin.recheckPayment(req.params.id)
+  res.json({ success: true, message: "Receipt checked again", data: { order } })
+}
+
+export const byCode: RequestHandler<{ code: string }> = async (req, res) => {
+  const order = await admin.findByPickupCode(pickupCodeSchema.parse(req.params.code))
+  res.json({ success: true, data: { order } })
 }

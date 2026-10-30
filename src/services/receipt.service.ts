@@ -74,8 +74,10 @@ async function download(url: string,timeoutMs = 10_000): Promise<Buffer | null> 
     if (Number(response.headers.get("content-length")) > MAX_BYTES) return null
     const bytes = Buffer.from(await response.arrayBuffer())
     return bytes.length > MAX_BYTES ? null : bytes
-  } catch (error) {
-    console.error(`Receipt download from ${host} failed:`, error instanceof Error ? error.message : error)
+  }    catch (error) {
+    const cause = error instanceof Error ? error.cause : undefined
+    const reason = cause instanceof Error ? `${(cause as NodeJS.ErrnoException).code ?? ""} ${cause.message}`.trim() : ""
+    console.error(`Receipt download from ${host} failed:`, error instanceof Error ? error.message : error, reason)
     return null
   }
 }

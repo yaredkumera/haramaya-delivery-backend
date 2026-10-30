@@ -55,8 +55,9 @@ export function checkReceipt(receipt: Receipt, expected: Expected) {
   if (Math.abs(receipt.amount - expected.amount) > 0.01) {
     problems.push(`Amount is ${receipt.amount} ETB, expected ${expected.amount} ETB`)
   }
-  if (matches.length === 0) problems.push("The money did not go to one of our accounts")
-  if (!sameName(expected.payerName, receipt.payerName, 2)) problems.push("The payer name does not match")
+if (matches.length === 0) {
+  problems.push(`The money did not go to one of our accounts (receipt shows "${receipt.receiver}", account ending ${lastDigits(receipt.receiverAccount ?? "", 4) || "unknown"})`)
+}  if (!sameName(expected.payerName, receipt.payerName, 2)) problems.push("The payer name does not match")
   if (!(age >= -60_000 && age <= MAX_AGE_MS)) problems.push("The payment date is too old or invalid")
 
   return { problems, paidTo: matches.length === 1 ? matches[0].method : undefined }
@@ -88,11 +89,6 @@ const parseCbeDate = (text: string) => {
   return new Date(`${m[3]}-${pad(m[1])}-${pad(m[2])}T${pad(hour)}:${m[5]}:${m[6]}+03:00`)
 }
 
-// Only "2026-10-14 17:45:00" style for now. Anything else returns null (manual review).
-const parseIsoLocal = (text: string) => {
-  const m = text.match(/(\d{4})-(\d{2})-(\d{2})\D+(\d{2}):(\d{2}):(\d{2})/)
-  return m ? new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}+03:00`) : null
-}
 
 async function readCbe(ft: string): Promise<Receipt | null> {
   const suffix = lastDigits(env.CBE_ACCOUNT, 8)
@@ -132,32 +128,76 @@ async function readCbe(ft: string): Promise<Receipt | null> {
   }
 }
 
+// Telebirr: "13-10-2026 11:47:33" is day-month-year, Ethiopia time (UTC+3)
+const parseTelebirrDate = (text: string) => {
+  const m = text.match(/(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/)
+  return m ? new Date(`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:${m[6]}+03:00`) : null
+}
+
+// Every visible text piece of the page, in reading order
+type DomNode = { type: string; data?: string; children?: DomNode[] }
+function textPieces($: ReturnType<typeof cheerio.load>): string[] {
+  $("script, style, noscript").remove()
+  const pieces: string[] = []
+  const walk = (node: DomNode) => {
+    if (node.type === "text") {
+      const text = clean(node.data ?? "")
+      if (text) pieces.push(text)
+    } else {
+      node.children?.forEach(walk)
+    }
+  }
+  $("body").each((_, el) => walk(el as unknown as DomNode))
+  return pieces
+}
+
+// Telebirr to a bank account shows one row: "<account number> <account holder name>"
+function splitBankField(text: string) {
+  const m = text.match(/^([\d*]{6,})\s+(.+)$/)
+  return m ? { account: m[1], name: m[2] } : null
+}
+
 async function readTelebirr(id: string): Promise<Receipt | null> {
   if (!/^[A-Z0-9]{10}$/.test(id)) return null
-  const bytes = await download(`https://transactioninfo.ethiotelecom.et/receipt/${id}`,20_000)
+  const bytes = await download(`https://transactioninfo.ethiotelecom.et/receipt/${id}`, 20_000)
   if (!bytes) return null
 
   const $ = cheerio.load(bytes.toString("utf8"))
+
+  // Top block: two cells per row (label | value)
   const rows = new Map<string, string>()
   $("tr").each((_, row) => {
-    const cells = $(row).find("td")
-    if (cells.length >= 2) rows.set(norm(cells.eq(0).text()), clean(cells.eq(1).text()))
+    const cells = $(row).children("td")
+    if (cells.length !== 2) return
+    const label = norm(cells.eq(0).text())
+    if (label.length < 120 && !rows.has(label)) rows.set(label, clean(cells.eq(1).text()))
   })
   const pick = (label: string) => [...rows].find(([key]) => key.includes(label))?.[1] ?? ""
 
-  const paidAt = parseIsoLocal(pick("payment date"))
-  const amount = toNumber(pick("settled amount"))
-  if (pick("invoice no") !== id || !paidAt || !amount) return null
+  // Invoice table: 3 header cells (Invoice No. | Payment date | Settled Amount), then 3 values
+  const pieces = textPieces($)
+  const i = pieces.findIndex((p) => /Invoice No\./i.test(p))
+  const [invoiceNo = "", dateText = "", settled = ""] = i === -1 ? [] : pieces.slice(i + 3, i + 6)
+
+  const paidAt = parseTelebirrDate(dateText)
+  const amount = toNumber(settled)
+  if (invoiceNo !== id || !paidAt || !amount) {
+    console.error("Telebirr receipt not recognised:", { invoiceNo, hasDate: Boolean(paidAt), amount })
+    return null
+  }
+
+  // Money sent to a bank account: the real receiver is in the "Bank account number" row
+  const bank = splitBankField(pick("bank account number"))
 
   return {
     reference: id,
     successful: /complet|success/i.test(pick("transaction status")),
     amount,
     payerName: pick("payer name"),
-    receiver: pick("credited party name"),
+    receiver: bank ? bank.name : pick("credited party name"),
+    receiverAccount: bank ? bank.account : pick("credited party account") || undefined,
     paidAt,
-        source: "telebirr",
-    receiverAccount: pick("bank account number") || undefined,
+    source: "telebirr",
   }
 }
 

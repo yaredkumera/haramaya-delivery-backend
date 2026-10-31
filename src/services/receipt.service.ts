@@ -159,12 +159,8 @@ function splitBankField(text: string) {
   return m ? { account: m[1], name: m[2] } : null
 }
 
-async function readTelebirr(id: string): Promise<Receipt | null> {
-  if (!/^[A-Z0-9]{10}$/.test(id)) return null
-  const bytes = await download(`https://transactioninfo.ethiotelecom.et/receipt/${id}`, 20_000)
-  if (!bytes) return null
-
-  const $ = cheerio.load(bytes.toString("utf8"))
+export function parseTelebirr(id: string, html: string): Receipt | null {
+  const $ = cheerio.load(html)
 
   // Top block: two cells per row (label | value)
   const rows = new Map<string, string>()
@@ -176,7 +172,6 @@ async function readTelebirr(id: string): Promise<Receipt | null> {
   })
   const pick = (label: string) => [...rows].find(([key]) => key.includes(label))?.[1] ?? ""
 
-  // Invoice table: 3 header cells (Invoice No. | Payment date | Settled Amount), then 3 values
   const pieces = textPieces($)
   const i = pieces.findIndex((p) => /Invoice No\./i.test(p))
   const [invoiceNo = "", dateText = "", settled = ""] = i === -1 ? [] : pieces.slice(i + 3, i + 6)
@@ -188,7 +183,6 @@ async function readTelebirr(id: string): Promise<Receipt | null> {
     return null
   }
 
-  // Money sent to a bank account: the real receiver is in the "Bank account number" row
   const bank = splitBankField(pick("bank account number"))
 
   return {
@@ -201,6 +195,12 @@ async function readTelebirr(id: string): Promise<Receipt | null> {
     paidAt,
     source: "telebirr",
   }
+}
+
+async function readTelebirr(id: string): Promise<Receipt | null> {
+  if (!/^[A-Z0-9]{10}$/.test(id)) return null
+  const bytes = await download(`https://transactioninfo.ethiotelecom.et/receipt/${id}`, 20_000)
+  return bytes ? parseTelebirr(id, bytes.toString("utf8")) : null
 }
 
 export async function fetchReceipt(source: ReceiptSource, transactionId: string): Promise<Receipt | null> {

@@ -4,9 +4,10 @@ import type { Order } from "../models/order.model.js"
 import ApiError from "../utils/ApiError.js"
 import type { AdminOrderQuery } from "../validators/order.schema.js"
 import { autoVerify, toStudentOrder } from "./order.service.js"
-
 export async function recheckPayment(id: string) {
+  await OrderModel.updateOne({ _id: id, paymentStatus: "review" }, { $unset: { receiptCheckedAt: 1 } })
   await autoVerify(id)
+
   const order = await OrderModel.findById(id).populate("user", CUSTOMER)
   if (!order) throw new ApiError(404, "Order not found")
   return toAdminOrder(order)

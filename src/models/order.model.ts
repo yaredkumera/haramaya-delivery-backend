@@ -45,6 +45,7 @@ const orderSchema = new Schema(
       paidAt: { type: Date },
     },
     reviewNotes: { type: [String], default: [] },
+    receiptCheckedAt: { type: Date },
     pickupCode: { type: String, required: true, unique: true },
     paidAt: { type: Date },
     collectedAt: { type: Date },

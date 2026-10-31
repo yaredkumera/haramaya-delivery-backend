@@ -10,9 +10,11 @@ import productRouter from "./routes/product.routes.js"
 import cartRoutes from "./routes/cart.routes.js"
 import orderRouter from "./routes/order.routes.js"
 import adminOrderRouter from "./routes/order.admin.routes.js"
+import checkerRoutes from "./routes/checker.routes.js"
 const app = express()
 app.use(helmet())
 if (env.NODE_ENV === "production") app.set("trust proxy", 1)
+    app.use("/api/checker", checkerRoutes)
 app.use(cors({ origin: env.FRONTEND_URL, credentials: true }))
 app.use(express.json({ limit: "10kb" }))
 

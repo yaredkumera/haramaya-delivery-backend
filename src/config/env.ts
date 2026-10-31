@@ -15,6 +15,7 @@ TELEBIRR_NAME: z.string().min(1),
 TELEBIRR_NUMBER: z.string().min(1),
 CBE_NAME: z.string().min(1),
 CBE_ACCOUNT: z.string().min(1),
+CHECKER_TOKEN: z.string().min(32).optional(),
 })
 const parsed = envSchema.safeParse(process.env)
 if (!parsed.success) {

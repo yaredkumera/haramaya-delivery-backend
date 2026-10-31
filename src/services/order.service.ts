@@ -10,6 +10,7 @@ import ApiError from "../utils/ApiError.js"
 import type { CheckoutInput } from "../validators/order.schema.js"
 import { checkReceipt, detectSource, fetchReceipt } from "./receipt.service.js"
 import type { ReceiptSource } from "../models/order.model.js"
+import type { Receipt } from "./receipt.service.js"
 type DigitalCheckout = Extract<CheckoutInput, { transactionId: string }>
 
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -54,25 +55,29 @@ async function assertUnclaimed(source: ReceiptSource, transactionId: string) {
   if (taken) throw new ApiError(409, "This transaction ID was already used for another order")
 }
 
-async function readAndCheck(source: ReceiptSource, transactionId: string, payerName: string, total: number) {
-  const receipt = await fetchReceipt(source, transactionId)
-  if (!receipt) {
-    return { receipt: null, problems: ["The receipt could not be checked automatically"], paidTo: undefined }
-  }
-  return { receipt, ...checkReceipt(receipt, { reference: transactionId, amount: total, payerName }) }
-}
+// async function readAndCheck(source: ReceiptSource, transactionId: string, payerName: string, total: number) {
+//   const receipt = await fetchReceipt(source, transactionId)
+//   if (!receipt) {
+//     return { receipt: null, problems: ["The receipt could not be checked automatically"], paidTo: undefined }
+//   }
+//   return { receipt, ...checkReceipt(receipt, { reference: transactionId, amount: total, payerName }) }
+// }
 
 // Safe to call again and again: it only changes an order that is still waiting for review
-export async function autoVerify(orderId: string) {
+// Safe to call again and again: it only changes an order that is still waiting for review
+export async function autoVerify(orderId: string, prefetched?: Receipt | null) {
   const order = await OrderModel.findOne({ _id: orderId, paymentStatus: "review" })
   if (!order || !order.receiptSource || !order.transactionId || !order.payerName) return
 
-  const { receipt, problems, paidTo } = await readAndCheck(
-    order.receiptSource,
-    order.transactionId,
-    order.payerName,
-    order.total,
-  )
+  // With a checker configured, Telebirr receipts are read from Ethiopia, not from here
+  if (prefetched === undefined && order.receiptSource === "telebirr" && env.CHECKER_TOKEN) return
+
+  const receipt =
+    prefetched === undefined ? await fetchReceipt(order.receiptSource, order.transactionId) : prefetched
+
+  const { problems, paidTo } = receipt
+    ? checkReceipt(receipt, { reference: order.transactionId, amount: order.total, payerName: order.payerName })
+    : { problems: ["The receipt could not be checked automatically"], paidTo: undefined }
 
   const facts = receipt
     ? {
@@ -92,6 +97,7 @@ export async function autoVerify(orderId: string) {
       $set: {
         ...facts,
         reviewNotes: problems,
+        receiptCheckedAt: new Date(),
         ...(problems.length === 0 ? { paymentStatus: "paid", paidAt: new Date() } : {}),
       },
     },

@@ -5,7 +5,7 @@ import ApiError from "../utils/ApiError.js"
 import { deleteImage, uploadProductImage } from "./cloudinary.service.js"
 import type { UploadedImage } from "./cloudinary.service.js"
 import type { CreateProductInput, ListQuery, UpdateProductInput } from "../validators/product.schema.js"
-
+import { escapeRegex } from "../utils/escapeRegex.js"
 export type PublicProduct = Pick<
   Product,
   "name" | "description" | "price" | "imageUrl" | "category" | "market" | "badge" | "available"
@@ -31,7 +31,6 @@ export function toPublicProduct(product: HydratedDocument<Product>): PublicProdu
   }
 }
 
-const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 const removeImage = (publicId: string) =>
   deleteImage(publicId).catch((error) => console.error("Could not delete image:", publicId, error))

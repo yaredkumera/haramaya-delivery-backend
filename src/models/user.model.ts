@@ -14,6 +14,7 @@ const userSchema = new Schema(
     },
     passwordHash: { type: String, required: true, select: false },
     role: { type: String, enum: ["student", "admin"], default: "student" },
+        blocked: { type: Boolean, default: false },
   },
   { timestamps: true },
 );

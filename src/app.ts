@@ -11,6 +11,7 @@ import cartRoutes from "./routes/cart.routes.js"
 import orderRouter from "./routes/order.routes.js"
 import adminOrderRouter from "./routes/order.admin.routes.js"
 import checkerRoutes from "./routes/checker.routes.js"
+import adminUserRouter from "./routes/user.admin.routes.js"
 const app = express()
 app.use(helmet())
 if (env.NODE_ENV === "production") app.set("trust proxy", 1)
@@ -23,6 +24,7 @@ app.use("/api/products",productRouter)
 app.use("/api/cart", cartRoutes)
 app.use("/api/orders", orderRouter)
 app.use("/api/admin/orders", adminOrderRouter)
+app.use("/api/admin/users", adminUserRouter)
 app.use(notFound)
 app.use(errorHandler)
 export default app

@@ -6,7 +6,7 @@ import UserModel from "../models/user.model.js"
 import type { User } from "../models/user.model.js"
 import ApiError from "../utils/ApiError.js"
 import type { LoginInput, RegisterInput } from "../validators/auth.schema.js"
-
+import { sendEmail } from "../utils/sendEmail.js"
 export type PublicUser = Pick<User, "fullName" | "phone" | "email" | "role"> & { id: string }
 export type AuthResult = { token: string; user: PublicUser }
 
@@ -50,7 +50,30 @@ export async function registerUser(input: RegisterInput): Promise<AuthResult> {
     email: input.email,
     passwordHash,
   })
+// 📧 Send Welcome Email (Fire and forget, non-blocking)
+  sendEmail({
+    to: user.email,
+    subject: "Welcome to Haramaya Campus Delivery! 🍔",
+    html: `
+      <div style="font-family: sans-serif; padding: 20px;">
+        <h2>Welcome, ${user.fullName}!</h2>
+        <p>Your account has been created successfully.</p>
+        <p>You can now order food and campus essentials directly to your dorm block.</p>
+        <br/>
+        <p>Need help with checkout or payment? Contact our dispatch team anytime!</p>
+      </div>
+    `,
+    text: `Welcome, ${user.fullName}! Your account has been created successfully.`,
+  }).catch((err) => console.error("Failed to fire welcome email:", err))
 
+  // 📧 (Optional) Alert Yourself/Admin when a new user signs up
+  if (env.ADMIN_EMAIL) {
+    sendEmail({
+      to: env.ADMIN_EMAIL,
+      subject: `🚨 New Registration: ${user.fullName}`,
+      html: `<p>New student registered: <strong>${user.fullName}</strong> (${user.phone}, ${user.email})</p>`,
+    }).catch((err) => console.error("Failed to fire admin alert email:", err))
+  }
   return issueSession(user)
 }
 
@@ -62,7 +85,7 @@ export async function loginUser(input: LoginInput): Promise<AuthResult> {
   if (!user || !passwordOk) {
     throw new ApiError(401, "Invalid email or password")
   }
-
+  if (user.blocked) throw new ApiError(403, "This account has been blocked. Please contact support.")
   return issueSession(user)
 }
 export async function getCurrentUser(id: string): Promise<PublicUser> {

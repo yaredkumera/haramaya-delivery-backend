@@ -9,10 +9,52 @@ import type { LoginInput, RegisterInput } from "../validators/auth.schema.js"
 import { sendEmail } from "../utils/sendEmail.js"
 export type PublicUser = Pick<User, "fullName" | "phone" | "email" | "role"> & { id: string }
 export type AuthResult = { token: string; user: PublicUser }
-
+import {OAuth2Client} from "google-auth-library"
 // Used so login takes about the same time whether or not the email exists
 const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", 12)
+const googleClient = new OAuth2Client(env.GOOGLE_CLIENT_ID)
 
+async function linkOrCreate(googleId: string, email: string, name?: string) {
+  // An existing password account with this email gets linked. Its old password is removed,
+  // so a password set by someone else before (we never verified the email) cannot be used.
+  const linked = await UserModel.findOneAndUpdate(
+    { email, googleId: { $exists: false } },
+    { $set: { googleId }, $unset: { passwordHash: 1 } },
+    { returnDocument: "after" },
+  )
+  return linked ?? UserModel.create({ fullName: (name || email.split("@")[0]).slice(0, 80), email, googleId })
+}
+
+export async function googleLogin(credential: string): Promise<AuthResult> {
+  const ticket = await googleClient
+    .verifyIdToken({ idToken: credential, audience: env.GOOGLE_CLIENT_ID })
+    .catch(() => null)
+  const profile = ticket?.getPayload()
+
+  if (!profile?.sub || !profile.email || !profile.email_verified) {
+    throw new ApiError(401, "Google sign-in failed")
+  }
+
+  const user =
+    (await UserModel.findOne({ googleId: profile.sub })) ??
+    (await linkOrCreate(profile.sub, profile.email.toLowerCase(), profile.name))
+
+  if (user.blocked) throw new ApiError(403, "This account has been blocked. Please contact support.")
+  return issueSession(user)
+}
+
+export async function updateUserPhone(id: string, phone: string): Promise<PublicUser> {
+  if (await UserModel.exists({ phone, _id: { $ne: id } })) {
+    throw new ApiError(409, "Phone number already registered")
+  }
+  const user = await UserModel.findByIdAndUpdate(
+    id,
+    { $set: { phone } },
+    { returnDocument: "after", runValidators: true },
+  )
+  if (!user) throw new ApiError(401, "Account no longer exists")
+  return toPublicUser(user)
+}
 function toPublicUser(user: HydratedDocument<User>): PublicUser {
   return {
     id: String(user._id),
@@ -67,9 +109,9 @@ export async function registerUser(input: RegisterInput): Promise<AuthResult> {
   }).catch((err) => console.error("Failed to fire welcome email:", err))
 
   // 📧 (Optional) Alert Yourself/Admin when a new user signs up
-  if (env.ADMIN_EMAIL) {
+  if (env.EMAIL_FROM) {
     sendEmail({
-      to: env.ADMIN_EMAIL,
+      to: env.EMAIL_FROM,
       subject: `🚨 New Registration: ${user.fullName}`,
       html: `<p>New student registered: <strong>${user.fullName}</strong> (${user.phone}, ${user.email})</p>`,
     }).catch((err) => console.error("Failed to fire admin alert email:", err))

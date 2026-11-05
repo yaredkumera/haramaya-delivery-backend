@@ -16,7 +16,7 @@ const CUSTOMER = "fullName phone email"
 const options = { returnDocument: "after", runValidators: true } as const
 
 export function toAdminOrder(order: HydratedDocument<Order>) {
-  const customer = order.user as unknown as { fullName: string; phone: string; email: string }
+  const customer = order.user as unknown as{ fullName: string; phone?: string; email: string }
   return {
     ...toStudentOrder(order),
     customer: { fullName: customer.fullName, phone: customer.phone, email: customer.email },

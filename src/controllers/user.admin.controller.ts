@@ -1,7 +1,7 @@
 import type { RequestHandler } from "express"
 import * as users from "../services/user.admin.service.js"
 import { userQuerySchema } from "../validators/user.schema.js"
-
+import { createResetLink } from "../services/password.service.js"
 type WithId = { id: string }
 
 export const list: RequestHandler = async (req, res) => {
@@ -19,4 +19,7 @@ export const unblock: RequestHandler<WithId> = async (req, res) => {
 export const remove: RequestHandler<WithId> = async (req, res) => {
   await users.deleteUser(req.params.id)
   res.json({ success: true, message: "User deleted" })
+}
+export const resetLink: RequestHandler<WithId> = async (req, res) => {
+  res.json({ success: true, data: { link: await createResetLink(req.params.id) } })
 }

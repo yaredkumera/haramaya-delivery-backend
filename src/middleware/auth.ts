@@ -9,6 +9,7 @@ import UserModel from "../models/user.model.js"
 const payloadSchema = z.object({
   sub: z.string(),
   role: z.enum(["student", "admin"]),
+  iat:z.number(),
 })
 
 export const authenticate: RequestHandler = async (req, _res, next) => {
@@ -20,10 +21,13 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
   )
   if (!payload.success) throw new ApiError(401, "Invalid token")
 
-  const user = await UserModel.findById(payload.data.sub).select("role blocked")
+  
+  const user = await UserModel.findById(payload.data.sub).select("role blocked tokensValidFrom")
   if (!user) throw new ApiError(401, "Account no longer exists")
   if (user.blocked) throw new ApiError(401, "Your account has been blocked")
-
+  if (user.tokensValidFrom && payload.data.iat < Math.floor(user.tokensValidFrom.getTime() / 1000)) {
+    throw new ApiError(401, "Please sign in again")
+  }
   req.user = { id: String(user._id), role: user.role }
   next()
 }

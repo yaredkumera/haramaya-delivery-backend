@@ -4,6 +4,7 @@ import type { HydratedDocument } from "mongoose"
 import { env } from "../config/env.js"
 import CartModel from "../models/cart.model.js"
 import OrderModel from "../models/order.model.js"
+import UserModel from "../models/user.model.js"
 import type { Order } from "../models/order.model.js"
 import type { Product } from "../models/product.model.js"
 import ApiError from "../utils/ApiError.js"
@@ -105,6 +106,8 @@ export async function autoVerify(orderId: string, prefetched?: Receipt | null) {
 }
 
 export async function placeOrder(userId: string, input: CheckoutInput) {
+    const buyer = await UserModel.findById(userId).select("phone")
+  if (!buyer?.phone) throw new ApiError(400, "Add your phone number before placing an order")
   const cart = await CartModel.findOne({ user: userId }).populate("items.product")
   if (!cart || cart.items.length === 0) throw new ApiError(400, "Your cart is empty")
 

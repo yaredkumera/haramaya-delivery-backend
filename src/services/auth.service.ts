@@ -10,7 +10,7 @@ import { sendEmail } from "../utils/sendEmail.js"
 export type PublicUser = Pick<User, "fullName" | "phone" | "email" | "role"> & { id: string }
 export type AuthResult = { token: string; user: PublicUser }
 import {OAuth2Client} from "google-auth-library"
-// Used so login takes about the same time whether or not the email exists
+import { notifyAdmin } from "./email.service.js"
 const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", 12)
 const googleClient = new OAuth2Client(env.GOOGLE_CLIENT_ID)
 
@@ -22,8 +22,10 @@ async function linkOrCreate(googleId: string, email: string, name?: string) {
     { $set: { googleId }, $unset: { passwordHash: 1 } },
     { returnDocument: "after" },
   )
-  return linked ?? UserModel.create({ fullName: (name || email.split("@")[0]).slice(0, 80), email, googleId })
-}
+  if (linked) return linked
+  const created = await UserModel.create({ fullName: (name || email.split("@")[0]).slice(0, 80), email, googleId })
+  notifyAdmin("New student registered with Google", `${created.fullName}\n${created.email}`)
+  return created}
 
 export async function googleLogin(credential: string): Promise<AuthResult> {
   const ticket = await googleClient
@@ -92,7 +94,7 @@ export async function registerUser(input: RegisterInput): Promise<AuthResult> {
     email: input.email,
     passwordHash,
   })
-// 📧 Send Welcome Email (Fire and forget, non-blocking)
+    notifyAdmin("New student registered", `${user.fullName}\n${user.email}\n${user.phone}`)
   sendEmail({
     to: user.email,
     subject: "Welcome to Haramaya Campus Delivery! 🍔",
@@ -109,9 +111,9 @@ export async function registerUser(input: RegisterInput): Promise<AuthResult> {
   }).catch((err) => console.error("Failed to fire welcome email:", err))
 
   // 📧 (Optional) Alert Yourself/Admin when a new user signs up
-  if (env.EMAIL_FROM) {
+  if (env.ADMIN_EMAIL) {
     sendEmail({
-      to: env.EMAIL_FROM,
+      to: env.ADMIN_EMAIL,
       subject: `🚨 New Registration: ${user.fullName}`,
       html: `<p>New student registered: <strong>${user.fullName}</strong> (${user.phone}, ${user.email})</p>`,
     }).catch((err) => console.error("Failed to fire admin alert email:", err))

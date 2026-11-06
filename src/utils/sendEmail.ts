@@ -1,7 +1,7 @@
 // src/utils/sendEmail.ts
 import { Resend } from "resend";
-
-const resend = new Resend(process.env.RESEND_API_KEY);
+import {env} from "../config/env.js"
+const resend = new Resend(env.RESEND_API_KEY);
 
 interface SendEmailOptions {
   to: string;
@@ -13,7 +13,7 @@ interface SendEmailOptions {
 export const sendEmail = async ({ to, subject, html, text }: SendEmailOptions) => {
   try {
     const data = await resend.emails.send({
-      from: "onboarding@resend.dev",
+      from:env.EMAIL_FROM,
       to,
       subject,
       html,

@@ -18,7 +18,8 @@ CBE_ACCOUNT: z.string().min(1),
 CHECKER_TOKEN: z.string().min(32).optional(),
 GOOGLE_CLIENT_ID: z.string().min(1),
 RESEND_API_KEY: z.string().optional(),
-EMAIL_FROM: z.string().optional(),
+EMAIL_FROM: z.string(),
+ADMIN_EMAIL:z.string(),
 })
 const parsed = envSchema.safeParse(process.env)
 if (!parsed.success) {

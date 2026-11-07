@@ -1,4 +1,5 @@
 import { v2 as cloudinary } from "cloudinary"
+import type { UploadApiOptions } from "cloudinary"
 import { env } from "../config/env.js"
 import ApiError from "../utils/ApiError.js"
 
@@ -11,15 +12,11 @@ cloudinary.config({
 
 export type UploadedImage = { url: string; publicId: string }
 
-export function uploadProductImage(buffer: Buffer): Promise<UploadedImage> {
+function upload(buffer: Buffer, options: UploadApiOptions): Promise<UploadedImage> {
   return new Promise((resolve, reject) => {
     cloudinary.uploader
       .upload_stream(
-        {
-          folder: "haramaya-delivery/products",
-          resource_type: "image",
-          allowed_formats: ["jpg", "jpeg", "png", "webp"],
-        },
+        { resource_type: "image", allowed_formats: ["jpg", "jpeg", "png", "webp"], ...options },
         (error, result) => {
           if (error || !result) {
             console.error("Cloudinary upload failed:", error)
@@ -31,6 +28,14 @@ export function uploadProductImage(buffer: Buffer): Promise<UploadedImage> {
       .end(buffer)
   })
 }
+
+export const uploadProductImage = (buffer: Buffer) => upload(buffer, { folder: "haramaya-delivery/products" })
+
+export const uploadAvatarImage = (buffer: Buffer) =>
+  upload(buffer, {
+    folder: "haramaya-delivery/avatars",
+    transformation: [{ width: 256, height: 256, crop: "fill", gravity: "auto" }],
+  })
 
 export async function deleteImage(publicId: string): Promise<void> {
   await cloudinary.uploader.destroy(publicId)

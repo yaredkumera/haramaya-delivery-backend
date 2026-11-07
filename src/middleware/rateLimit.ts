@@ -18,3 +18,5 @@ export const checkoutLimiter = limiter(60, 10, "Too many checkout attempts. Try 
 export const loginLimiter = limiter(15, 10, "Too many login attempts. Try again in a few minutes.", true)
 export const registerLimiter = limiter(60, 20, "Too many sign-ups from this network. Try again later.")
 export const resetLimiter = limiter(60, 10, "Too many attempts. Try again later.")
+export const passwordLimiter = limiter(15, 8, "Too many attempts. Try again in a few minutes.", true, true)
+export const avatarLimiter = limiter(60, 20, "Too many photo uploads. Try again later.", false, true)

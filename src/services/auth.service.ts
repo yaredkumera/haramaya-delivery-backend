@@ -7,7 +7,13 @@ import type { User } from "../models/user.model.js"
 import ApiError from "../utils/ApiError.js"
 import type { LoginInput, RegisterInput } from "../validators/auth.schema.js"
 import { sendEmail } from "../utils/sendEmail.js"
-export type PublicUser = Pick<User, "fullName" | "phone" | "email" | "role"> & { id: string }
+export type PublicUser = Pick<User, "fullName" | "phone" | "email" | "role"> & {
+  id: string
+  avatarUrl?: string
+  avatarSource?: "uploaded" | "google"
+  hasPassword: boolean
+  createdAt: Date
+}
 export type AuthResult = { token: string; user: PublicUser }
 import {OAuth2Client} from "google-auth-library"
 import { notifyAdmin } from "./email.service.js"
@@ -38,36 +44,34 @@ export async function googleLogin(credential: string): Promise<AuthResult> {
   }
 
   const user =
-    (await UserModel.findOne({ googleId: profile.sub })) ??
+    (await UserModel.findOne({ googleId: profile.sub }).select("+passwordHash")) ??
     (await linkOrCreate(profile.sub, profile.email.toLowerCase(), profile.name))
 
   if (user.blocked) throw new ApiError(403, "This account has been blocked. Please contact support.")
+
+  if (profile.picture?.startsWith("https://") && user.googlePicture !== profile.picture) {
+    user.googlePicture = profile.picture
+    await user.save()
+  }
   return issueSession(user)
 }
 
-export async function updateUserPhone(id: string, phone: string): Promise<PublicUser> {
-  if (await UserModel.exists({ phone, _id: { $ne: id } })) {
-    throw new ApiError(409, "Phone number already registered")
-  }
-  const user = await UserModel.findByIdAndUpdate(
-    id,
-    { $set: { phone } },
-    { returnDocument: "after", runValidators: true },
-  )
-  if (!user) throw new ApiError(401, "Account no longer exists")
-  return toPublicUser(user)
-}
-function toPublicUser(user: HydratedDocument<User>): PublicUser {
+
+export function toPublicUser(user: HydratedDocument<User>): PublicUser {
   return {
     id: String(user._id),
     fullName: user.fullName,
     phone: user.phone,
     email: user.email,
     role: user.role,
+    avatarUrl: user.avatarUrl ?? user.googlePicture ?? undefined,
+    avatarSource: user.avatarUrl ? "uploaded" : user.googlePicture ? "google" : undefined,
+    hasPassword: Boolean(user.passwordHash),
+    createdAt: user.createdAt,
   }
 }
 
-function issueSession(user: HydratedDocument<User>): AuthResult {
+export function issueSession(user: HydratedDocument<User>): AuthResult {
   const token = jwt.sign({ sub: String(user._id), role: user.role }, env.JWT_SECRET, {
     expiresIn: "7d",
   })
@@ -133,8 +137,7 @@ export async function loginUser(input: LoginInput): Promise<AuthResult> {
   return issueSession(user)
 }
 export async function getCurrentUser(id: string): Promise<PublicUser> {
-  const user = await UserModel.findById(id)
-
+  const user = await UserModel.findById(id).select("+passwordHash")
   if (!user) {
     throw new ApiError(401, "Account no longer exists")
   }

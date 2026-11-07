@@ -19,6 +19,9 @@ const userSchema = new Schema(
     resetTokenHash: { type: String, select: false },
     resetTokenExpires: { type: Date, select: false },
     tokensValidFrom: { type: Date },
+        avatarUrl: { type: String },
+    avatarPublicId: { type: String, select: false },
+    googlePicture: { type: String },
   },
   { timestamps: true },
 );
